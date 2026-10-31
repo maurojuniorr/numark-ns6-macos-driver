@@ -8,7 +8,6 @@
 #endif
 
 #define NS6_MIDI_RECOVERY_SLOTS 4u
-#endif
 _Static_assert(NS6_MIDI_RECOVERY_SLOTS > 0 && NS6_MIDI_RECOVERY_SLOTS <= 32,
                "MIDI recovery mask supports 1 to 32 slots");
 

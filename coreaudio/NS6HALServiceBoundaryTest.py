@@ -5,7 +5,8 @@ end = source.index("static OSStatus end_io(", start)
 callback = source[start:end]
 will_do_start = source.index("static OSStatus will_do(AudioServerPlugInDriverRef d,")
 will_do = source[will_do_start:source.index("static OSStatus begin_io(AudioServerPlugInDriverRef d,", will_do_start)]
-assert "*will=operation==kAudioServerPlugInIOOperationWriteMix||operation==kAudioServerPlugInIOOperationReadInput" in will_do, "the HAL must use the established per-client WriteMix path"
+assert "object==DEVICE_ID&&operation==kAudioServerPlugInIOOperationWriteMix" in will_do
+assert "object==INPUT_DEVICE_ID&&operation==kAudioServerPlugInIOOperationReadInput" in will_do
 assert "kAudioServerPlugInIOOperationMixOutput" not in will_do, "MixOutput must not be negotiated while blocks are appended to a FIFO"
 output_start = callback.index("if(operation==kAudioServerPlugInIOOperationWriteMix)")
 output_mix = callback[output_start:]
@@ -29,7 +30,7 @@ for forbidden in (
     "calloc(",
 ):
     assert forbidden not in callback, f"Audio callback must not call {forbidden}"
-assert "ns6_capture_ring_read(&memory->capture" in callback, "ReadInput must consume the shared capture ring"
+assert "ns6_capture_readers_read(&capture_readers,&memory->capture_fanout" in callback, "ReadInput must use an independent reader for the shared capture"
 assert "memory->capture_requested" in callback, "ReadInput must publish capture demand to the USB service"
 assert "ns6_hal_mapping_acquire(&callback_mapping" in callback, "callbacks must pin a live, reclaim-safe shared mapping"
 assert "ns6_hal_mapping_release(&callback_mapping)" in callback, "callbacks must release every shared mapping lease"

@@ -7,7 +7,14 @@ int main(void){
     ns6_capture_ring_init(&ring);
     const float input[]={0.1f,-0.1f,0.2f,-0.2f,0.3f,-0.3f,0.4f,-0.4f};
     float output[10]={9.0f,9.0f,9.0f,9.0f,9.0f,9.0f,9.0f,9.0f,9.0f,9.0f};
+    ns6_capture_ring_note_completion(&ring, 1000000000ull);
+    uint64_t noted_frame=99, noted_time=0;
+    assert(ns6_capture_ring_completion(&ring,&noted_frame,&noted_time));
+    assert(noted_frame==0 && noted_time==1000000000ull);
     assert(ns6_capture_ring_write(&ring,input,4)==4);
+    ns6_capture_ring_note_completion(&ring, 1010000000ull);
+    assert(ns6_capture_ring_completion(&ring,&noted_frame,&noted_time));
+    assert(noted_frame==4 && noted_time==1010000000ull);
     assert(ns6_capture_ring_read(&ring,output,3)==3);
     assert(output[0]==0.1f&&output[1]==-0.1f&&output[4]==0.3f&&output[5]==-0.3f);
     assert(ns6_capture_ring_read(&ring,output,3)==1);

@@ -63,10 +63,12 @@ static bool start_device_service(void) {
         return false;
     }
     ns6_transport_bind_shared(&shared_memory->output, &transport_reader);
+    ns6_usb_bind_capture_fanout(&shared_memory->capture_fanout);
     ns6_usb_bind_shared_capture(&shared_memory->capture,&shared_memory->capture_requested,
                                 &shared_memory->capture_last_demand_ns);
     if (!ns6_device_service_publish(shared_memory)) {
         ns6_transport_bind_shared(NULL, NULL);
+        ns6_usb_bind_capture_fanout(NULL);
         ns6_usb_bind_shared_capture(NULL,NULL,NULL);
         mach_vm_deallocate(mach_task_self(), shared_memory_address, shared_memory_allocation_size);
         shared_memory = NULL;
@@ -111,7 +113,6 @@ static void maintain_device_service(void) {
 }
 #endif
 
-static void blackout_controller(void);
 static void stop(int signal_number){(void)signal_number;running=0;}
 static uint64_t monotonic_ms(void){struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);return (uint64_t)now.tv_sec*1000+(uint64_t)now.tv_nsec/1000000;}
 #if !NS6_DEVICE_SERVICE_BUILD
@@ -132,7 +133,6 @@ static void log_outbound_activity(void){
 }
 static void receive_from_application(const MIDIPacketList *list,void *reference,void *connection){
     (void)reference;(void)connection;
-    if(list&&list->numPackets)observe_client_activity();
     unsigned char report[41];
     size_t used=0;
     const MIDIPacket *packet=list->packet;
@@ -150,7 +150,7 @@ static void receive_from_application(const MIDIPacketList *list,void *reference,
                     bool unseen=false;if(atomic_compare_exchange_strong(&heartbeat_seen,&unseen,true))os_log(OS_LOG_DEFAULT,"Numark NS6 MIDI bridge received its first application heartbeat");
                     break;
                 }
-                send_to_driver(packet->data+offset,remaining>41?41:remaining);
+                for (UInt16 part=0;part<remaining;part+=41) send_to_driver(packet->data+offset+part,remaining-part>41?41:remaining-part);
                 break;
             }
             unsigned length=midi_length(status);
@@ -196,6 +196,7 @@ int main(void){
     ns6_usb_stop();
     update_device_service_state(false);
     ns6_transport_bind_shared(NULL, NULL);
+    ns6_usb_bind_capture_fanout(NULL);
     ns6_usb_bind_shared_capture(NULL, NULL, NULL);
     ns6_device_service_stop();
     if (shared_memory_address)
@@ -204,20 +205,21 @@ int main(void){
 #else
     MIDIClientRef client=0;MIDIEndpointRef source=0,destination=0;
     signal(SIGINT,stop);signal(SIGTERM,stop);
-    if(!open_socket()||MIDIClientCreate(CFSTR("Numark NS6 MIDI Bridge"),NULL,NULL,&client)!=noErr||MIDISourceCreate(client,CFSTR("Numark NS6"),&source)!=noErr||MIDIDestinationCreate(client,CFSTR("Numark NS6"),receive_from_application,NULL,&destination)!=noErr){fprintf(stderr,"Could not start Numark NS6 MIDI Bridge\n");if(destination)MIDIEndpointDispose(destination);if(source)MIDIEndpointDispose(source);if(client)MIDIClientDispose(client);if(socket_fd>=0)close(socket_fd);return 1;}
+    if(!open_socket()||MIDIClientCreate(CFSTR("Numark NS6 MIDI Bridge"),NULL,NULL,&client)!=noErr||MIDISourceCreate(client,CFSTR("Numark USB Audio Device MIDI"),&source)!=noErr||MIDIDestinationCreate(client,CFSTR("Numark USB Audio Device MIDI"),receive_from_application,NULL,&destination)!=noErr){fprintf(stderr,"Could not start Numark NS6 MIDI Bridge\n");if(destination)MIDIEndpointDispose(destination);if(source)MIDIEndpointDispose(source);if(client)MIDIClientDispose(client);if(socket_fd>=0)close(socket_fd);return 1;}
     /* Virtual endpoints do not inherit USB descriptors. Publish the NS6
        identity so host applications can associate their controller profile. */
     MIDIObjectSetStringProperty(source,kMIDIPropertyManufacturer,CFSTR("Numark"));
     MIDIObjectSetStringProperty(source,kMIDIPropertyModel,CFSTR("NS6"));
-    MIDIObjectSetStringProperty(source,kMIDIPropertyDisplayName,CFSTR("Numark NS6 MIDI"));
+    MIDIObjectSetStringProperty(source,kMIDIPropertyDisplayName,CFSTR("Numark USB Audio Device MIDI"));
+    MIDIObjectSetStringProperty(source,kMIDIPropertyDriverOwner,CFSTR("com.numark.ns6.midi"));
     MIDIObjectSetIntegerProperty(source,kMIDIPropertyUniqueID,0x4e533601);
     MIDIObjectSetStringProperty(destination,kMIDIPropertyManufacturer,CFSTR("Numark"));
     MIDIObjectSetStringProperty(destination,kMIDIPropertyModel,CFSTR("NS6"));
-    MIDIObjectSetStringProperty(destination,kMIDIPropertyDisplayName,CFSTR("Numark NS6 MIDI"));
+    MIDIObjectSetStringProperty(destination,kMIDIPropertyDisplayName,CFSTR("Numark USB Audio Device MIDI"));
+    MIDIObjectSetStringProperty(destination,kMIDIPropertyDriverOwner,CFSTR("com.numark.ns6.midi"));
     MIDIObjectSetIntegerProperty(destination,kMIDIPropertyUniqueID,0x4e533602);
     fprintf(stderr,"Numark NS6 MIDI Bridge ready\n");
     while(running){
-        maintain_audio_session();
         unsigned char data[64];ssize_t length=recv(socket_fd,data,sizeof(data),0);
         if(length<=0){
             uint64_t heartbeat=atomic_load(&last_heartbeat_ms);
@@ -234,8 +236,6 @@ int main(void){
         if(MIDIPacketListAdd(list,sizeof(storage),packet,0,(UInt16)length,data))MIDIReceived(source,list);
         log_outbound_activity();
     }
-    set_client_active(false);
-    release_audio_session();
     MIDIEndpointDispose(destination);MIDIEndpointDispose(source);MIDIClientDispose(client);close(socket_fd);
     return 0;
 #endif

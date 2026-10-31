@@ -5,6 +5,7 @@ NEW_AGENT="/Library/LaunchAgents/io.github.maurojuniorr.numark-ns6-device-servic
 SYSTEM_DAEMON="/Library/LaunchDaemons/io.github.maurojuniorr.numark-ns6-device-service.plist"
 OLD_AGENT="/Library/LaunchAgents/io.github.maurojuniorr.numark-ns6-midi-bridge.plist"
 DRIVER="/Library/Audio/Plug-Ins/HAL/NumarkNS6M1.driver"
+MODULAR_DRIVER="/Library/Audio/Plug-Ins/HAL/NumarkNS6.driver"
 STATUS_APP="/Applications/Numark NS6 Status.app"
 CONSOLE_UID=$(/usr/bin/stat -f '%u' /dev/console)
 
@@ -29,6 +30,9 @@ fi
 /bin/rm -f "$NEW_AGENT" "$OLD_AGENT" "$SYSTEM_DAEMON"
 if [[ -e "$APP_SUPPORT/had-driver" ]]; then
     /usr/bin/ditto "$APP_SUPPORT/NumarkNS6M1.driver" "$DRIVER"
+fi
+if [[ -e "$APP_SUPPORT/had-modular-driver" ]]; then
+    /usr/bin/ditto "$APP_SUPPORT/NumarkNS6.driver" "$MODULAR_DRIVER"
 fi
 if [[ -e "$APP_SUPPORT/had-status-app" ]]; then
     /usr/bin/ditto "$APP_SUPPORT/Numark NS6 Status.app" "$STATUS_APP"

@@ -9,6 +9,7 @@ struct ns6_midi_parser {
     uint8_t message[3];
     uint8_t used;
     uint8_t expected;
+    uint8_t sysex;
 };
 
 /* In the 42-byte NS6 report, byte 41 is a report terminator, not MIDI data. */
@@ -25,6 +26,20 @@ static inline size_t ns6_midi_parser_feed(struct ns6_midi_parser *parser,
         uint8_t byte = input[i];
         /* 0xfd fills unused USB report bytes; it is not a MIDI message. */
         if (byte == 0xfd) continue;
+        if (byte == 0xf0) {
+            parser->used = parser->expected = 0;
+            parser->sysex = 1;
+            if (written < capacity) output[written++] = byte;
+            continue;
+        }
+        if (parser->sysex) {
+            if (byte < 0x80 || byte == 0xf7 || byte >= 0xf8) {
+                if (written < capacity) output[written++] = byte;
+                if (byte == 0xf7) parser->sysex = 0;
+                continue;
+            }
+            parser->sysex = 0;
+        }
         if (byte & 0x80) {
             parser->used = 0;
             parser->expected = 0;

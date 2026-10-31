@@ -49,7 +49,7 @@
 #define FEEDBACK_SLOT_COUNT 2
 #define SLOT_COUNT NS6_USB_OUTPUT_SLOT_COUNT
 #define MAX_PACKET 156
-#define WAVEFORM_READ_SLOTS 3
+#define WAVEFORM_READ_SLOTS 8
 #define WAVEFORM_READ_BYTES 10240
 
 struct slot {
@@ -61,7 +61,7 @@ struct slot {
     uint64_t last_submit_ns, last_submit_cpu_ns;
 };
 struct feedback_slot { IOUSBLowLatencyIsocFrame *frames; unsigned char *data; };
-struct waveform_slot { unsigned char data[WAVEFORM_READ_BYTES]; atomic_bool in_flight; uint32_t generation; };
+struct waveform_slot { unsigned char data[WAVEFORM_READ_BYTES]; atomic_bool in_flight; uint32_t generation; uint64_t sequence; bool completed; IOReturn status; UInt32 bytes; };
 static IOUSBInterfaceInterface **interface;
 static IOUSBInterfaceInterface **auxiliary_interface;
 static CFRunLoopSourceRef source;
@@ -71,8 +71,10 @@ static struct slot slots[SLOT_COUNT];
 static struct feedback_slot feedback[FEEDBACK_SLOT_COUNT];
 static atomic_bool feedback_in_flight[FEEDBACK_SLOT_COUNT];
 static struct waveform_slot waveform[WAVEFORM_READ_SLOTS];
+static uint64_t waveform_submit_sequence, waveform_process_sequence;
 static NS6CaptureRing local_capture_ring;
 static NS6CaptureRing *capture_ring=&local_capture_ring;
+static NS6CaptureFanout *capture_fanout;
 static bool shared_capture_ring;
 static atomic_bool *shared_capture_requested;
 static atomic_uint_fast64_t *shared_capture_last_demand_ns;
@@ -330,6 +332,7 @@ static IOReturn submit_waveform_read(struct waveform_slot *slot){
     bool expected=false;
     if(!atomic_compare_exchange_strong_explicit(&slot->in_flight,&expected,true,memory_order_acq_rel,memory_order_acquire))return kIOReturnBusy;
     slot->generation=atomic_load_explicit(&waveform_generation,memory_order_acquire);
+    slot->sequence=waveform_submit_sequence;
     IOReturn result=(*auxiliary_interface)->ReadPipeAsync(auxiliary_interface,waveform_pipe,slot->data,sizeof(slot->data),waveform_read_complete,slot);
     if(result==kIOUSBPipeStalled&&atomic_load_explicit(&waveform_drain_running,memory_order_acquire)){
         IOReturn clear=(*auxiliary_interface)->ClearPipeStallBothEnds(auxiliary_interface,waveform_pipe);
@@ -337,36 +340,55 @@ static IOReturn submit_waveform_read(struct waveform_slot *slot){
             result=(*auxiliary_interface)->ReadPipeAsync(auxiliary_interface,waveform_pipe,slot->data,sizeof(slot->data),waveform_read_complete,slot);
     }
     if(result!=kIOReturnSuccess)atomic_store_explicit(&slot->in_flight,false,memory_order_release);
+    else ++waveform_submit_sequence;
     return result;
 }
 static void waveform_read_complete(void *reference,IOReturn status,void *argument){
     struct waveform_slot *slot=reference;
-    uint32_t completion_generation=slot?slot->generation:0;
-    if(slot)atomic_store_explicit(&slot->in_flight,false,memory_order_release);
-    if(!slot||!atomic_load_explicit(&waveform_drain_running,memory_order_acquire))return;
-    if(completion_generation!=atomic_load_explicit(&waveform_generation,memory_order_acquire)){
-        (void)submit_waveform_read(slot);
+    if(!slot)return;
+    atomic_store_explicit(&slot->in_flight,false,memory_order_release);
+    if(!atomic_load_explicit(&waveform_drain_running,memory_order_acquire))return;
+    if(slot->generation!=atomic_load_explicit(&waveform_generation,memory_order_acquire)){
+        atomic_store_explicit(&recovery_requested,true,memory_order_release);
         return;
     }
+    slot->status=status;
+    slot->bytes=(UInt32)(uintptr_t)argument;
+    slot->completed=true;
+    for(;;){
+        slot=NULL;
+        for(unsigned i=0;i<WAVEFORM_READ_SLOTS;++i){
+            if(waveform[i].completed && waveform[i].sequence==waveform_process_sequence){slot=&waveform[i];break;}
+        }
+        if(!slot)return;
+        status=slot->status;
+        uint32_t completion_generation=slot->generation;
     if(status==kIOReturnSuccess){
         uint64_t completed=atomic_fetch_add_explicit(&waveform_completions,1,memory_order_relaxed)+1;
         uint64_t now=monotonic_ns();
         uint64_t last_demand=shared_capture_last_demand_ns?atomic_load_explicit(shared_capture_last_demand_ns,memory_order_acquire):atomic_load_explicit(&capture_last_demand_ns,memory_order_acquire);
         bool requested=shared_capture_requested?atomic_load_explicit(shared_capture_requested,memory_order_acquire):atomic_load_explicit(&capture_active,memory_order_acquire);
-        if(requested&&last_demand&&now-last_demand<250000000ull&&
+        if(ns6_capture_demand_recent(requested,last_demand,now)&&
            atomic_load_explicit(&waveform_drain_running,memory_order_acquire)&&
            completion_generation==atomic_load_explicit(&waveform_generation,memory_order_acquire)){
-            UInt32 bytes=(UInt32)(uintptr_t)argument;
+            UInt32 bytes=slot->bytes;
             float decoded[(WAVEFORM_READ_BYTES/NS6_CAPTURE_SOURCE_STRIDE)*NS6_CAPTURE_CHANNELS];
             size_t frames=ns6_capture_decode_block(slot->data,bytes,decoded,WAVEFORM_READ_BYTES/NS6_CAPTURE_SOURCE_STRIDE);
             bool still_current=atomic_load_explicit(&waveform_drain_running,memory_order_acquire)&&
                                completion_generation==atomic_load_explicit(&waveform_generation,memory_order_acquire);
             if(still_current){
-                size_t accepted=ns6_capture_ring_write(capture_ring,decoded,frames);
+                size_t accepted;
+                if(capture_fanout){
+                    accepted=ns6_capture_fanout_write(capture_fanout,decoded,frames);
+                    ns6_capture_ring_note_position(capture_ring,atomic_load_explicit(&capture_fanout->head,memory_order_acquire),now);
+                }else{
+                    accepted=ns6_capture_ring_write(capture_ring,decoded,frames);
+                    ns6_capture_ring_note_completion(capture_ring,now);
+                }
                 atomic_fetch_add_explicit(&capture_frames_decoded,frames,memory_order_relaxed);
                 if(accepted<frames)atomic_fetch_add_explicit(&capture_ring_drops,frames-accepted,memory_order_relaxed);
             }
-        }else if(last_demand&&now-last_demand>=250000000ull){
+        }else if(last_demand&&!ns6_capture_demand_recent(true,last_demand,now)){
             atomic_store_explicit(&capture_active,false,memory_order_release);
             if(shared_capture_requested)atomic_store_explicit(shared_capture_requested,false,memory_order_release);
         }
@@ -382,15 +404,28 @@ static void waveform_read_complete(void *reference,IOReturn status,void *argumen
                 os_log_error(OS_LOG_DEFAULT,"Numark NS6 bulk-IN endpoint stall recovery failed: 0x%08x",(unsigned)clear);
         }
     }
-    IOReturn result=submit_waveform_read(slot);
-    if(result!=kIOReturnSuccess){
-        uint64_t errors=atomic_fetch_add_explicit(&waveform_errors,1,memory_order_relaxed)+1;
-        if(should_log_once_per_second(&waveform_last_log_ms))
-            os_log_error(OS_LOG_DEFAULT,"Numark NS6 bulk-IN endpoint read resubmit failed: 0x%08x (%llu errors)",(unsigned)result,(unsigned long long)errors);
+        slot->completed=false;
+        ++waveform_process_sequence;
+        IOReturn result=submit_waveform_read(slot);
+        if(result!=kIOReturnSuccess){
+            atomic_fetch_add_explicit(&waveform_errors,1,memory_order_relaxed);
+            os_log_error(OS_LOG_DEFAULT,"Numark NS6 bulk-IN ordered read resubmit failed: 0x%08x",(unsigned)result);
+            atomic_store_explicit(&recovery_requested,true,memory_order_release);
+            return;
+        }
     }
 }
 static void start_waveform_drain(void){
     if(!waveform_pipe)return;
+    for(unsigned i=0;i<WAVEFORM_READ_SLOTS;++i){
+        if(atomic_load_explicit(&waveform[i].in_flight,memory_order_acquire)){
+            os_log_error(OS_LOG_DEFAULT,"Numark NS6 capture restart blocked by an outstanding USB read");
+            atomic_store_explicit(&recovery_requested,true,memory_order_release);
+            return;
+        }
+        waveform[i].completed=false;
+    }
+    waveform_submit_sequence=waveform_process_sequence=0;
     atomic_fetch_add_explicit(&waveform_generation,1,memory_order_acq_rel);
     atomic_store_explicit(&waveform_drain_running,true,memory_order_release);
     unsigned queued=0;
@@ -402,6 +437,7 @@ static void start_waveform_drain(void){
             os_log_error(OS_LOG_DEFAULT,"Numark NS6 waveform endpoint initial read %u failed: 0x%08x (%llu errors)",i,(unsigned)result,(unsigned long long)errors);
         }
     }
+    if(queued!=WAVEFORM_READ_SLOTS) atomic_store_explicit(&recovery_requested,true,memory_order_release);
     os_log(OS_LOG_DEFAULT,"Numark NS6 waveform drain started: %u/%u asynchronous reads queued",queued,WAVEFORM_READ_SLOTS);
 }
 static void stop_waveform_drain(void){
@@ -412,6 +448,18 @@ static void stop_waveform_drain(void){
     if(shared_capture_requested)atomic_store_explicit(shared_capture_requested,false,memory_order_release);
     if(shared_capture_last_demand_ns)atomic_store_explicit(shared_capture_last_demand_ns,0,memory_order_release);
     if(was_running&&auxiliary_interface&&waveform_pipe)(*auxiliary_interface)->AbortPipe(auxiliary_interface,waveform_pipe);
+    uint64_t deadline=monotonic_ns()+500000000ull;
+    bool outstanding=true;
+    while(outstanding&&monotonic_ns()<deadline){
+        outstanding=false;
+        for(unsigned i=0;i<WAVEFORM_READ_SLOTS;++i)if(atomic_load_explicit(&waveform[i].in_flight,memory_order_acquire)){outstanding=true;break;}
+        if(outstanding)CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.01,true);
+    }
+    if(outstanding){
+        os_log_error(OS_LOG_DEFAULT,"Numark NS6 capture abort timed out; restarting USB session");
+        atomic_store_explicit(&recovery_requested,true,memory_order_release);
+    }
+    for(unsigned i=0;i<WAVEFORM_READ_SLOTS;++i)waveform[i].completed=false;
     os_log(OS_LOG_DEFAULT,"Numark NS6 bulk-IN reads paused after capture demand ended");
 }
 void ns6_usb_reset_capture_session(void){
@@ -570,6 +618,8 @@ bool ns6_usb_get_firmware_version(char output[32]){
 static void fill(struct slot *slot){
     unsigned char *output=slot->data;
     unsigned millisecond_frames[8];
+    double source_step=1.0;
+    bool source_step_valid=false;
     for(unsigned packet=0;packet<PACKETS;++packet){
         uint64_t last_feedback=atomic_load_explicit(&feedback_last_valid_ms,memory_order_acquire);
         if(ns6_clock_control_is_locked(&clock_control)&&last_feedback){
@@ -582,8 +632,10 @@ static void fill(struct slot *slot){
                 os_log_error(OS_LOG_DEFAULT,"Numark NS6 stale feedback reset at monotonic %llu ms: last valid report age %llu ms, queue %u frames, retaining nominal 44.1 kHz cadence",(unsigned long long)now_ms,(unsigned long long)feedback_age_ms,ns6_transport_available());
             }
         }
-        if((packet % 8u) == 0)
+        if((packet % 8u) == 0){
             ns6_clock_control_next_millisecond(&clock_control, millisecond_frames);
+            source_step_valid=false;
+        }
         unsigned frames=millisecond_frames[packet % 8u];
         slot->frames[packet].frReqCount=(UInt16)(frames*FRAME_BYTES); slot->frames[packet].frActCount=0; slot->frames[packet].frStatus=0;
         if(atomic_load_explicit(&output_paused,memory_order_acquire)&&
@@ -619,8 +671,12 @@ static void fill(struct slot *slot){
             atomic_store_explicit(&awaiting_audio_prefill,false,memory_order_release);
             have_last_recovery_sample=false;
         }
-        UInt32 available=ns6_transport_available();
-        double source_step=ns6_clock_control_source_frames_per_output_frame(&clock_control,available);
+        /* A 1 ms snapshot avoids rescanning the queue for every USB microframe. */
+        if(!source_step_valid){
+            UInt32 available=ns6_transport_available();
+            source_step=ns6_clock_control_source_frames_per_output_frame(&clock_control,available);
+            source_step_valid=true;
+        }
         NS6TransportStopReason stop_reason=NS6_TRANSPORT_STOP_NONE;
         UInt32 received=ns6_transport_dequeue_resampled_diagnostic(output,frames,source_step,&stop_reason);
         if(received<frames){
@@ -876,7 +932,7 @@ static void *worker(void *unused){
             }
             uint64_t capture_demand=shared_capture_last_demand_ns?atomic_load_explicit(shared_capture_last_demand_ns,memory_order_acquire):atomic_load_explicit(&capture_last_demand_ns,memory_order_acquire);
             bool capture_active_now=shared_capture_requested?atomic_load_explicit(shared_capture_requested,memory_order_acquire):atomic_load_explicit(&capture_active,memory_order_acquire);
-            bool capture_requested=capture_active_now&&capture_demand&&monotonic_ns()-capture_demand<250000000ull;
+            bool capture_requested=ns6_capture_demand_recent(capture_active_now,capture_demand,monotonic_ns());
             bool should_run_bulk_in=ns6_bulk_in_reads_should_run(midi_session_active,capture_requested);
             bool bulk_in_running=atomic_load_explicit(&waveform_drain_running,memory_order_acquire);
             if(capture_requested&&!bulk_in_running){
@@ -958,6 +1014,7 @@ size_t ns6_usb_capture_read(float *output,size_t frames){
     if(!atomic_exchange_explicit(&capture_active,true,memory_order_acq_rel))ns6_capture_ring_clear(capture_ring);
     return ns6_capture_ring_read(capture_ring,output,frames);
 }
+void ns6_usb_bind_capture_fanout(NS6CaptureFanout *fanout){capture_fanout=fanout;}
 void ns6_usb_bind_shared_capture(NS6CaptureRing *ring,atomic_bool *requested,
                                 atomic_uint_fast64_t *last_demand_ns){
     if(ring&&requested&&last_demand_ns){

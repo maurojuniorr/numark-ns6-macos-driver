@@ -1,4 +1,5 @@
 SDK := $(shell xcrun --show-sdk-path)
+NS6_ARCH ?= x86_64
 ADAPTIVE_CLOCK ?= 1
 NS6_FEEDBACK_PATTERN_SCHEDULER ?= $(ADAPTIVE_CLOCK)
 NS6_ADAPTIVE_CLOCK_MIN_OUTPUT_RATE_MILLIHZ ?= 44000000
@@ -14,12 +15,12 @@ NS6_IDLE_PCM_KEEPALIVE ?= 0
 NS6_USB_OUTPUT_SLOT_COUNT ?= 8
 NS6_CLOCK_QUEUE_TARGET_FRAMES ?= 4096
 DRIVER_OPT_FLAGS ?= -O2
-CFLAGS := -Wall -Wextra -Werror -arch arm64 -isysroot $(SDK) -mmacosx-version-min=15.0 -fPIC -DNS6_ADAPTIVE_CLOCK_ENABLED=$(ADAPTIVE_CLOCK) -DNS6_FEEDBACK_PATTERN_SCHEDULER_ENABLED=$(NS6_FEEDBACK_PATTERN_SCHEDULER) -DNS6_ADAPTIVE_CLOCK_MIN_OUTPUT_RATE_MILLIHZ=$(NS6_ADAPTIVE_CLOCK_MIN_OUTPUT_RATE_MILLIHZ) -DNS6_MIDI_ENABLED=$(NS6_MIDI_ENABLED) -DNS6_MIDI_KEEP_INPUT_IDLE=$(NS6_MIDI_KEEP_INPUT_IDLE) -DNS6_MIDI_IDLE_READ_COUNT=$(NS6_MIDI_IDLE_READ_COUNT) -DNS6_MIDI_INITIAL_READ_COUNT=$(NS6_MIDI_INITIAL_READ_COUNT) -DNS6_MIDI_DIAGNOSTIC_NO_RETRY_NOT_RESPONDING=$(NS6_MIDI_DIAGNOSTIC_NO_RETRY_NOT_RESPONDING) -DNS6_USB_LOG_EXCLUSIVE_OWNER=$(NS6_USB_LOG_EXCLUSIVE_OWNER) -DNS6_KEEP_WAVEFORM_DRAIN_IDLE=$(NS6_KEEP_WAVEFORM_DRAIN_IDLE) -DNS6_FEEDBACK_READER_ENABLED=$(NS6_FEEDBACK_READER_ENABLED) -DNS6_IDLE_PCM_KEEPALIVE=$(NS6_IDLE_PCM_KEEPALIVE) -DNS6_USB_OUTPUT_SLOT_COUNT=$(NS6_USB_OUTPUT_SLOT_COUNT) -DNS6_CLOCK_QUEUE_TARGET_FRAMES=$(NS6_CLOCK_QUEUE_TARGET_FRAMES)
+CFLAGS := -Wall -Wextra -Werror -arch $(NS6_ARCH) -isysroot $(SDK) -mmacosx-version-min=12.0 -fPIC -DNS6_ADAPTIVE_CLOCK_ENABLED=$(ADAPTIVE_CLOCK) -DNS6_FEEDBACK_PATTERN_SCHEDULER_ENABLED=$(NS6_FEEDBACK_PATTERN_SCHEDULER) -DNS6_ADAPTIVE_CLOCK_MIN_OUTPUT_RATE_MILLIHZ=$(NS6_ADAPTIVE_CLOCK_MIN_OUTPUT_RATE_MILLIHZ) -DNS6_MIDI_ENABLED=$(NS6_MIDI_ENABLED) -DNS6_MIDI_KEEP_INPUT_IDLE=$(NS6_MIDI_KEEP_INPUT_IDLE) -DNS6_MIDI_IDLE_READ_COUNT=$(NS6_MIDI_IDLE_READ_COUNT) -DNS6_MIDI_INITIAL_READ_COUNT=$(NS6_MIDI_INITIAL_READ_COUNT) -DNS6_MIDI_DIAGNOSTIC_NO_RETRY_NOT_RESPONDING=$(NS6_MIDI_DIAGNOSTIC_NO_RETRY_NOT_RESPONDING) -DNS6_USB_LOG_EXCLUSIVE_OWNER=$(NS6_USB_LOG_EXCLUSIVE_OWNER) -DNS6_KEEP_WAVEFORM_DRAIN_IDLE=$(NS6_KEEP_WAVEFORM_DRAIN_IDLE) -DNS6_FEEDBACK_READER_ENABLED=$(NS6_FEEDBACK_READER_ENABLED) -DNS6_IDLE_PCM_KEEPALIVE=$(NS6_IDLE_PCM_KEEPALIVE) -DNS6_USB_OUTPUT_SLOT_COUNT=$(NS6_USB_OUTPUT_SLOT_COUNT) -DNS6_CLOCK_QUEUE_TARGET_FRAMES=$(NS6_CLOCK_QUEUE_TARGET_FRAMES)
 BUILD := build/NumarkNS6.driver/Contents
 DRIVER_BUNDLE := $(patsubst %/Contents,%,$(BUILD))
 APP := build/NumarkNS6Status.app
 EXPERIMENTAL_SERVICE := build-experimental/NumarkNS6DeviceService
-EXPERIMENTAL_VERSION ?= 0.2.177
+EXPERIMENTAL_VERSION ?= 1.0.2
 EXPERIMENTAL_PACKAGE_ROOT := build-experimental/package-root-$(EXPERIMENTAL_VERSION)
 EXPERIMENTAL_COMPONENT_PLIST := component-plist-experimental.plist
 EXPERIMENTAL_DIST := build-experimental/dist-$(EXPERIMENTAL_VERSION)
@@ -99,7 +100,7 @@ app: $(APP)/Contents/MacOS/NumarkNS6Status $(APP)/Contents/MacOS/NumarkNS6MIDIBr
 $(APP)/Contents/MacOS/NumarkNS6Status: status-app/NS6Status.swift
 	mkdir -p $(APP)/Contents/MacOS
 	mkdir -p $(SWIFT_MODULE_CACHE)
-	swiftc -O -module-cache-path $(SWIFT_MODULE_CACHE) -target arm64-apple-macosx15.0 $< -o $@ -framework AppKit -framework CoreAudio -framework IOKit
+	swiftc -O -module-cache-path $(SWIFT_MODULE_CACHE) -target $(NS6_ARCH)-apple-macosx12.0 $< -o $@ -framework AppKit -framework CoreAudio -framework IOKit
 $(APP)/Contents/MacOS/NumarkNS6MIDIBridge: build/NumarkNS6MIDIBridge
 	mkdir -p $(APP)/Contents/MacOS
 	cp $< $@
@@ -205,7 +206,7 @@ $(EXPERIMENTAL_SERVICE): FORCE NS6MIDIBridge.c NS6DeviceMachService.c NS6DeviceO
 	$(CC) $(CFLAGS) -DNS6_DEVICE_SERVICE_BUILD=1 $(DRIVER_OPT_FLAGS) NS6MIDIBridge.c NS6DeviceMachService.c NS6Transport.c NS6USB.c NS6USBTiming.c NS6ClockControl.c NS6MIDI.c NS6AudioRecovery.c NS6FirmwareVersion.c -o $@ -framework CoreAudio -framework CoreFoundation -framework CoreMIDI -framework IOKit -lbsm -lm -pthread
 
 experimental-package: VERSION := $(EXPERIMENTAL_VERSION)
-experimental-package: capture-test hal-service-boundary-test service-lifecycle-test hal-mapping-test sign device-service build-experimental/NS6DeviceServiceProbe
+experimental-package: capture-test capture-fanout-test capture-readers-test split-device-contract-test hal-service-boundary-test service-lifecycle-test hal-mapping-test sign device-service build-experimental/NS6DeviceServiceProbe
 	rm -rf $(EXPERIMENTAL_PACKAGE_ROOT) $(EXPERIMENTAL_DIST)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(EXPERIMENTAL_PACKAGE_ROOT)/Library/Audio/Plug-Ins/HAL $(EXPERIMENTAL_PACKAGE_ROOT)/Library/LaunchDaemons $(EXPERIMENTAL_PACKAGE_ROOT)/Library/LaunchAgents $(EXPERIMENTAL_PACKAGE_ROOT)/Applications $(EXPERIMENTAL_DIST)
 	cp $(EXPERIMENTAL_SERVICE) $(APP)/Contents/MacOS/NumarkNS6DeviceService
@@ -313,3 +314,25 @@ install: experimental-package
 
 uninstall:
 	sudo '/Applications/Numark NS6 Status.app/Contents/Resources/rollback-persistent-service'
+
+.PHONY: capture-timestamp-test
+capture-timestamp-test: NS6CaptureTimestampTest.c NS6CaptureTimestamp.h
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror NS6CaptureTimestampTest.c -o build/ns6-capture-timestamp-test
+	build/ns6-capture-timestamp-test
+
+.PHONY: capture-fanout-test capture-readers-test
+capture-fanout-test: NS6CaptureFanoutTest.c NS6CaptureFanout.h
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -pthread NS6CaptureFanoutTest.c -o build/ns6-capture-fanout-test
+	build/ns6-capture-fanout-test
+capture-readers-test: NS6CaptureReadersTest.c NS6CaptureReaders.h NS6CaptureFanout.h
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror NS6CaptureReadersTest.c -o build/ns6-capture-readers-test
+	build/ns6-capture-readers-test
+
+.PHONY: split-device-contract-test
+split-device-contract-test: NS6SplitDeviceContractTest.c NS6HAL.c NS6DeviceClient.c NS6Transport.c NS6IOMetrics.c
+	mkdir -p build
+	$(CC) $(CFLAGS) NS6SplitDeviceContractTest.c NS6DeviceClient.c NS6Transport.c NS6IOMetrics.c -o build/ns6-split-contract-test -framework CoreAudio -framework CoreFoundation -framework IOKit
+	build/ns6-split-contract-test

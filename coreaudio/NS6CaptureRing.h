@@ -2,6 +2,7 @@
 #define NS6_CAPTURE_RING_H
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -11,12 +12,38 @@ typedef struct {
     float samples[NS6_CAPTURE_RING_CAPACITY*NS6_CAPTURE_RING_CHANNELS];
     atomic_uint_fast64_t head;
     atomic_uint_fast64_t tail;
+    atomic_uint_fast64_t completion_seq, completion_frame, completion_ns;
 } NS6CaptureRing;
 
 static inline void ns6_capture_ring_init(NS6CaptureRing *ring){
     if(!ring)return;
     atomic_init(&ring->head,0);
     atomic_init(&ring->tail,0);
+    atomic_init(&ring->completion_seq,0);
+    atomic_init(&ring->completion_frame,0);
+    atomic_init(&ring->completion_ns,0);
+}
+
+/* The timestamp is USB completion time, not the converter sample time. */
+static inline void ns6_capture_ring_note_position(NS6CaptureRing *ring,uint64_t frame,uint64_t now_ns){
+    atomic_fetch_add_explicit(&ring->completion_seq,1,memory_order_acq_rel);
+    atomic_store_explicit(&ring->completion_frame,frame,memory_order_relaxed);
+    atomic_store_explicit(&ring->completion_ns,now_ns,memory_order_relaxed);
+    atomic_fetch_add_explicit(&ring->completion_seq,1,memory_order_release);
+}
+static inline void ns6_capture_ring_note_completion(NS6CaptureRing *ring,uint64_t now_ns){
+    ns6_capture_ring_note_position(ring,atomic_load_explicit(&ring->head,memory_order_relaxed),now_ns);
+}
+static inline bool ns6_capture_ring_completion(const NS6CaptureRing *ring,uint64_t *frame,uint64_t *ns){
+    if(!ring||!frame||!ns)return false;
+    for(unsigned i=0;i<3;i++){
+        uint64_t before=atomic_load_explicit(&ring->completion_seq,memory_order_acquire);
+        if(!before||(before&1))continue;
+        uint64_t f=atomic_load_explicit(&ring->completion_frame,memory_order_relaxed);
+        uint64_t t=atomic_load_explicit(&ring->completion_ns,memory_order_relaxed);
+        if(before==atomic_load_explicit(&ring->completion_seq,memory_order_acquire)){*frame=f;*ns=t;return true;}
+    }
+    return false;
 }
 
 static inline void ns6_capture_ring_clear(NS6CaptureRing *ring){

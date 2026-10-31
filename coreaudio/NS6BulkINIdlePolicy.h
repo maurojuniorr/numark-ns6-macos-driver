@@ -2,6 +2,11 @@
 #define NS6_BULK_IN_IDLE_POLICY_H
 
 #include <stdbool.h>
+#include <stdint.h>
+
+static inline bool ns6_capture_demand_recent(bool requested, uint64_t last, uint64_t now) {
+    return requested && last && now >= last && now - last < 250000000ull;
+}
 
 #ifndef NS6_KEEP_WAVEFORM_DRAIN_IDLE
 #define NS6_KEEP_WAVEFORM_DRAIN_IDLE 0

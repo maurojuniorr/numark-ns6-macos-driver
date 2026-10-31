@@ -6,11 +6,20 @@ OLD_AGENT="/Library/LaunchAgents/io.github.maurojuniorr.numark-ns6-midi-bridge.p
 OLD_DEVICE_AGENT="/Library/LaunchAgents/io.github.maurojuniorr.numark-ns6-device-service.plist"
 SYSTEM_DAEMON="/Library/LaunchDaemons/io.github.maurojuniorr.numark-ns6-device-service.plist"
 OLD_DRIVER="/Library/Audio/Plug-Ins/HAL/NumarkNS6M1.driver"
+MODULAR_DRIVER="/Library/Audio/Plug-Ins/HAL/NumarkNS6.driver"
 STATUS_APP="/Applications/Numark NS6 Status.app"
 CONSOLE_UID=$(/usr/bin/stat -f '%u' /dev/console)
 
+if [[ -e "$APP_SUPPORT/had-modular-driver" && ! -e "${APP_SUPPORT}-initial" ]]; then
+    /bin/mv "$APP_SUPPORT" "${APP_SUPPORT}-initial"
+fi
 /bin/rm -rf "$APP_SUPPORT"
 /bin/mkdir -p "$APP_SUPPORT"
+if [[ -d "$MODULAR_DRIVER" ]]; then
+    /usr/bin/ditto "$MODULAR_DRIVER" "$APP_SUPPORT/NumarkNS6.driver"
+    /usr/bin/touch "$APP_SUPPORT/had-modular-driver"
+    /bin/rm -rf "$MODULAR_DRIVER"
+fi
 if [[ -d "$OLD_DRIVER" ]]; then
     /usr/bin/ditto "$OLD_DRIVER" "$APP_SUPPORT/NumarkNS6M1.driver"
     /usr/bin/touch "$APP_SUPPORT/had-driver"

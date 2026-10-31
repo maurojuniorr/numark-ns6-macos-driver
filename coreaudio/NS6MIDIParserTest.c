@@ -24,6 +24,13 @@ int main(void) {
     assert(count == 3);
     assert(output[0] == 0x81 && output[1] == 0x23 && output[2] == 0x00);
 
+    const unsigned char sysex1[] = {0xf0, 0x00, 0x01, 0xfd};
+    const unsigned char sysex2[] = {0x3f, 0x79, 0xf7, 0x81, 0x23, 0x00};
+    count = ns6_midi_parser_feed(&parser, sysex1, sizeof(sysex1), output, sizeof(output));
+    assert(count == 3 && output[0] == 0xf0 && output[2] == 0x01);
+    count = ns6_midi_parser_feed(&parser, sysex2, sizeof(sysex2), output, sizeof(output));
+    assert(count == 6 && output[0] == 0x3f && output[2] == 0xf7 && output[3] == 0x81);
+
     puts("NS6 MIDI parser tests passed");
     return 0;
 }
