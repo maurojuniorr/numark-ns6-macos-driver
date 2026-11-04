@@ -15,11 +15,11 @@ The build selects one architecture at a time. The repository is unified, but the
 
 ## Current test build
 
-The unified source is **Universal Beta 1.0.13**. The installer included here is the Intel (`x86_64`) build; it is not a universal binary. Build separately for Apple Silicon as described below.
+The installer below is a universal package for Intel (`x86_64`) and Apple Silicon (`arm64`) Macs. Its HAL driver, Status app, MIDI bridge, device service, and service probe each contain both architectures.
 
-[Download Numark NS6 Beta 1.0.13 — Intel build](packages/NumarkNS6-1.0.13-Intel-Beta.pkg)
+[Download Numark NS6 Universal Beta 1.0.13](packages/NumarkNS6-1.0.13-Universal-Beta.pkg)
 
-SHA-256: `63224e77fa7bcba7c37e55444699b4da4b1e44d2ad3712db87ac8a2c4a45be36`
+SHA-256: `2c885aef88e2858c8b26d846b2cc477782414af8ae0957911fd3d0542d8f9803`
 
 This local ad-hoc-signed package is not notarized. Installing it replaces existing driver components and restarts CoreAudio. An older Numark kernel extension can claim the controller's USB interface and block this driver; remove that conflict before testing.
 
