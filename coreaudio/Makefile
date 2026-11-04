@@ -21,6 +21,7 @@ DRIVER_BUNDLE := $(patsubst %/Contents,%,$(BUILD))
 APP := build/NumarkNS6Status.app
 EXPERIMENTAL_SERVICE := build-experimental/NumarkNS6DeviceService
 EXPERIMENTAL_VERSION ?= 1.0.2
+BETA_VERSION ?= 1.0.13
 EXPERIMENTAL_PACKAGE_ROOT := build-experimental/package-root-$(EXPERIMENTAL_VERSION)
 EXPERIMENTAL_COMPONENT_PLIST := component-plist-experimental.plist
 EXPERIMENTAL_DIST := build-experimental/dist-$(EXPERIMENTAL_VERSION)
@@ -223,7 +224,7 @@ experimental-package: capture-test capture-timeline-test capture-fanout-test cap
 	chmod 755 package-scripts-experimental/preinstall package-scripts-experimental/postinstall
 	xattr -cr $(EXPERIMENTAL_PACKAGE_ROOT)
 	plutil -lint $(EXPERIMENTAL_PACKAGE_ROOT)/Library/LaunchDaemons/io.github.maurojuniorr.numark-ns6-device-service.plist
-	pkgbuild --root $(EXPERIMENTAL_PACKAGE_ROOT) --component-plist $(EXPERIMENTAL_COMPONENT_PLIST) --scripts package-scripts-experimental --identifier $(PACKAGE_ID).experimental --version $(EXPERIMENTAL_VERSION) --install-location / $(EXPERIMENTAL_DIST)/NumarkNS6-$(EXPERIMENTAL_VERSION)-experimental-persistent-owner.pkg
+	pkgbuild --root $(EXPERIMENTAL_PACKAGE_ROOT) --component-plist $(EXPERIMENTAL_COMPONENT_PLIST) --scripts package-scripts-experimental --identifier $(PACKAGE_ID).experimental --version $(EXPERIMENTAL_VERSION) --install-location / $(EXPERIMENTAL_DIST)/NumarkNS6-$(EXPERIMENTAL_VERSION)-beta-persistent-owner.pkg
 
 clock-control-test: NS6ClockControlTest.c NS6ClockControl.c NS6ClockControl.h
 	$(CC) -Wall -Wextra -Werror -DNS6_ADAPTIVE_CLOCK_ENABLED=1 NS6ClockControlTest.c NS6ClockControl.c -o build/ns6-clock-control-test
@@ -307,10 +308,12 @@ sign: all
 	codesign --force --sign - --timestamp=none $(APP)
 	codesign --verify --strict --verbose=2 $(APP)
 
+package: EXPERIMENTAL_VERSION := $(BETA_VERSION)
 package: experimental-package
 
+install: EXPERIMENTAL_VERSION := $(BETA_VERSION)
 install: experimental-package
-	sudo /usr/sbin/installer -pkg $(EXPERIMENTAL_DIST)/NumarkNS6-$(EXPERIMENTAL_VERSION)-experimental-persistent-owner.pkg -target /
+	sudo /usr/sbin/installer -pkg $(EXPERIMENTAL_DIST)/NumarkNS6-$(EXPERIMENTAL_VERSION)-beta-persistent-owner.pkg -target /
 
 uninstall:
 	sudo '/Applications/Numark NS6 Status.app/Contents/Resources/rollback-persistent-service'
