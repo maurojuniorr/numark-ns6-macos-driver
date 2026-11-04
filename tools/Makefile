@@ -1,5 +1,7 @@
 SDK := $(shell xcrun --show-sdk-path)
-CFLAGS := -Wall -Wextra -Werror -arch arm64 -isysroot $(SDK) -mmacosx-version-min=15.0
+ARCH ?= x86_64
+MACOSX_DEPLOYMENT_TARGET ?= 10.15
+CFLAGS := -Wall -Wextra -Werror -arch $(ARCH) -isysroot $(SDK) -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
 LDFLAGS := -framework IOKit -framework CoreFoundation
 LIBUSB_CFLAGS := $(shell pkg-config --cflags libusb-1.0)
 LIBUSB_LIBS := $(shell pkg-config --libs libusb-1.0)

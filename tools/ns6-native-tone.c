@@ -33,7 +33,7 @@ static int prop16(io_registry_entry_t e, CFStringRef key, UInt16 *out) {
 }
 static IOUSBInterfaceInterface **open_ns6(void) {
     io_iterator_t it = IO_OBJECT_NULL; io_service_t s; kern_return_t kr;
-    kr = IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOUSBHostInterface"), &it);
+    kr = IOServiceGetMatchingServices(MACH_PORT_NULL, IOServiceMatching("IOUSBHostInterface"), &it);
     if (kr != KERN_SUCCESS) return NULL;
     while ((s = IOIteratorNext(it))) {
         io_registry_entry_t p = IO_OBJECT_NULL; UInt16 v = 0, d = 0; UInt8 n = 255;

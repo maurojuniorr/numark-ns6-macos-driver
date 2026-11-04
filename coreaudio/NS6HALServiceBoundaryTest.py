@@ -30,7 +30,7 @@ for forbidden in (
     "calloc(",
 ):
     assert forbidden not in callback, f"Audio callback must not call {forbidden}"
-assert "ns6_capture_readers_read(&capture_readers,&memory->capture_fanout" in callback, "ReadInput must use an independent reader for the shared capture"
+assert "ns6_capture_timeline_read(&capture_timeline,&memory->capture_fanout" in callback, "ReadInput must use the shared capture timeline"
 assert "memory->capture_requested" in callback, "ReadInput must publish capture demand to the USB service"
 assert "ns6_hal_mapping_acquire(&callback_mapping" in callback, "callbacks must pin a live, reclaim-safe shared mapping"
 assert "ns6_hal_mapping_release(&callback_mapping)" in callback, "callbacks must release every shared mapping lease"

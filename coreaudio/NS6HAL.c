@@ -1,6 +1,7 @@
 #include "NS6Transport.h"
 #include "NS6CaptureTimestamp.h"
 #include "NS6CaptureReaders.h"
+#include "NS6CaptureTimeline.h"
 #include "NS6SharedMemory.h"
 #include "NS6BufferFrameSize.h"
 #include "NS6ConnectionPolicy.h"
@@ -127,7 +128,8 @@ static unsigned untracked_input_io_starts;
 static UInt64 anchor_host_time;
 static mach_timebase_info_data_t timebase;
 static NS6CaptureReaders capture_readers;
-static void initialize_io_metrics(void){ns6_io_metrics_init(&ns6_io_metrics);ns6_capture_readers_init(&capture_readers);}
+static NS6CaptureTimeline capture_timeline;
+static void initialize_io_metrics(void){ns6_io_metrics_init(&ns6_io_metrics);ns6_capture_readers_init(&capture_readers);ns6_capture_timeline_init(&capture_timeline);}
 static uint64_t io_monotonic_ns(void){struct timespec now;if(clock_gettime(CLOCK_MONOTONIC,&now)!=0)return 0;return (uint64_t)now.tv_sec*1000000000ull+(uint64_t)now.tv_nsec;}
 static IONotificationPortRef usb_notifications;
 static io_iterator_t usb_added,usb_removed;
@@ -613,8 +615,9 @@ static OSStatus do_io(AudioServerPlugInDriverRef d,AudioObjectID object,AudioObj
             atomic_fetch_add_explicit(&memory->capture_epoch,1,memory_order_acq_rel);
         }
         atomic_store_explicit(&memory->capture_last_demand_ns,now_ns,memory_order_release);
-        (void)ns6_capture_readers_read(&capture_readers,&memory->capture_fanout,client,
+        (void)ns6_capture_timeline_read(&capture_timeline,&memory->capture_fanout,
             lease.session_id,atomic_load_explicit(&memory->capture_epoch,memory_order_acquire),
+            valid_input_time?(uint64_t)i->mInputTime.mSampleTime:0,valid_input_time,
             (float*)main_buffer,frames);
         ns6_device_session_io_end(&memory->session);
         ns6_hal_mapping_release(&callback_mapping);

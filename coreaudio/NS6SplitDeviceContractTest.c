@@ -38,13 +38,17 @@ int main(void) {
     ns6_hal_mapping_publish(&callback_mapping,&memory,99);
     pthread_once(&io_metrics_once,initialize_io_metrics);
     atomic_store(&memory.capture_requested,true);
-    float a[4],b[4]; const float data[]={0.1f,-0.1f,0.2f,-0.2f};
-    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,7,kAudioServerPlugInIOOperationReadInput,2,NULL,a,NULL)==noErr);
-    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,8,kAudioServerPlugInIOOperationReadInput,2,NULL,b,NULL)==noErr);
-    ns6_capture_fanout_write(&memory.capture_fanout,data,2);
-    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,7,kAudioServerPlugInIOOperationReadInput,2,NULL,a,NULL)==noErr);
-    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,8,kAudioServerPlugInIOOperationReadInput,2,NULL,b,NULL)==noErr);
-    for(int j=0;j<4;j++)assert(a[j]==data[j]&&b[j]==data[j]);
+    float a[4],b[4]; static float data[NS6_CAPTURE_RESERVE*2];
+    for(unsigned j=0;j<NS6_CAPTURE_RESERVE*2;j++)data[j]=0.25f;
+    AudioServerPlugInIOCycleInfo cycle={0};
+    cycle.mInputTime.mFlags=kAudioTimeStampSampleTimeValid;
+    cycle.mInputTime.mSampleTime=100;
+    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,7,kAudioServerPlugInIOOperationReadInput,2,&cycle,a,NULL)==noErr);
+    ns6_capture_fanout_write(&memory.capture_fanout,data,NS6_CAPTURE_RESERVE);
+    cycle.mInputTime.mSampleTime=102;
+    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,7,kAudioServerPlugInIOOperationReadInput,2,&cycle,a,NULL)==noErr);
+    assert(do_io(driver,INPUT_DEVICE_ID,INPUT_STREAM_ID,8,kAudioServerPlugInIOOperationReadInput,2,&cycle,b,NULL)==noErr);
+    for(int j=0;j<4;j++)assert(a[j]==0.25f&&b[j]==0.25f);
     ns6_hal_mapping_withdraw(&callback_mapping);
     return 0;
 }

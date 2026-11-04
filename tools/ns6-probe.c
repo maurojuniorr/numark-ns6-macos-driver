@@ -53,7 +53,7 @@ int main(void)
     CFDictionarySetValue(matching, CFSTR(kUSBProductID),
                          CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type,
                                         &(int){NS6_PRODUCT}));
-    kr = IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator);
+    kr = IOServiceGetMatchingServices(MACH_PORT_NULL, matching, &iterator);
     if (kr != KERN_SUCCESS || !(service = IOIteratorNext(iterator))) {
         fprintf(stderr, "NS6 %04x:%04x not found (0x%x)\\n", NS6_VENDOR, NS6_PRODUCT, kr);
         return 1;

@@ -206,7 +206,7 @@ $(EXPERIMENTAL_SERVICE): FORCE NS6MIDIBridge.c NS6DeviceMachService.c NS6DeviceO
 	$(CC) $(CFLAGS) -DNS6_DEVICE_SERVICE_BUILD=1 $(DRIVER_OPT_FLAGS) NS6MIDIBridge.c NS6DeviceMachService.c NS6Transport.c NS6USB.c NS6USBTiming.c NS6ClockControl.c NS6MIDI.c NS6AudioRecovery.c NS6FirmwareVersion.c -o $@ -framework CoreAudio -framework CoreFoundation -framework CoreMIDI -framework IOKit -lbsm -lm -pthread
 
 experimental-package: VERSION := $(EXPERIMENTAL_VERSION)
-experimental-package: capture-test capture-fanout-test capture-readers-test split-device-contract-test hal-service-boundary-test service-lifecycle-test hal-mapping-test sign device-service build-experimental/NS6DeviceServiceProbe
+experimental-package: capture-test capture-timeline-test capture-fanout-test capture-readers-test split-device-contract-test hal-service-boundary-test service-lifecycle-test hal-mapping-test sign device-service build-experimental/NS6DeviceServiceProbe
 	rm -rf $(EXPERIMENTAL_PACKAGE_ROOT) $(EXPERIMENTAL_DIST)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(EXPERIMENTAL_PACKAGE_ROOT)/Library/Audio/Plug-Ins/HAL $(EXPERIMENTAL_PACKAGE_ROOT)/Library/LaunchDaemons $(EXPERIMENTAL_PACKAGE_ROOT)/Library/LaunchAgents $(EXPERIMENTAL_PACKAGE_ROOT)/Applications $(EXPERIMENTAL_DIST)
 	cp $(EXPERIMENTAL_SERVICE) $(APP)/Contents/MacOS/NumarkNS6DeviceService
@@ -322,6 +322,11 @@ capture-timestamp-test: NS6CaptureTimestampTest.c NS6CaptureTimestamp.h
 	build/ns6-capture-timestamp-test
 
 .PHONY: capture-fanout-test capture-readers-test
+.PHONY: capture-timeline-test
+capture-timeline-test: NS6CaptureTimelineTest.c NS6CaptureTimeline.h NS6CaptureFanout.h
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror NS6CaptureTimelineTest.c -o build/ns6-capture-timeline-test
+	build/ns6-capture-timeline-test
 capture-fanout-test: NS6CaptureFanoutTest.c NS6CaptureFanout.h
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror -pthread NS6CaptureFanoutTest.c -o build/ns6-capture-fanout-test

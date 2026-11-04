@@ -1,1 +1,23 @@
 .worktrees/
+.DS_Store
+build/
+dist/
+*.dSYM/
+*.pkg
+ns6-clock-probe
+tools/ns6-probe
+tools/ns6-libusb-probe
+tools/ns6-isoc-schedule-probe
+tools/ns6-native-tone
+
+# Graphify outputs: keep portable graph artifacts, ignore machine-local cache/state.
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/cache/
+graphify-out/.graphify_*.json
+!graphify-out/.graphify_labels.json
+graphify-out/.graphify_uncached.txt
+
+# Deliberately distributed Intel test installer
+!packages/
+!packages/*.pkg

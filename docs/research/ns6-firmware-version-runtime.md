@@ -1,4 +1,8 @@
-# NS6 firmware query on hardware
+# NS6 firmware query on hardware (ARM64 evidence)
+
+These measurements were collected with the ARM64 macOS driver. They document
+the protocol decoder carried into the Intel port; they are not an Intel
+hardware validation result.
 
 On 2026-10-06, package 0.2.105 was installed on the user's Apple Silicon Mac with the NS6 connected. The HAL driver and Status app both reported version 0.2.105. The driver log recorded two successful vendor request `0xc0/0x56` transactions whose actual response length was **5 bytes**, although the request asked for 8:
 

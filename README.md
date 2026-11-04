@@ -1,76 +1,47 @@
 # Numark NS6 macOS Driver
 
-An independent CoreAudio and CoreMIDI driver for the original Numark NS6 on Apple Silicon Macs. The goal is to keep this controller usable with current macOS DJ and streaming software, without relying on the discontinued Intel-only Ploytec kernel extension.
+An independent community driver for the original Numark NS6. This repository brings the Intel (`x86_64`) and Apple Silicon (`arm64`) implementations together in one source tree, including CoreAudio, CoreMIDI, the persistent USB service, the MIDI bridge, and the Status app. It is not an official Numark or Ploytec product.
 
-This project is not an official Numark product. It targets the original NS6 (USB VID `15e4`, PID `0079`), not the NS6II. Development is based on protocol research, examination of the original driver, and testing with a physical controller.
-
-## Current release: 1.0.0
-
-The first 1.0 release packages the modular driver, MIDI bridge, automatic activation and recovery, and Status app. The installer is available from [GitHub Releases](https://github.com/maurojuniorr/numark-ns6-mac-arm64/releases/tag/v1.0.0).
+The build selects one architecture at a time. The repository is unified, but the installer linked below is an Intel test package; it is not a fat, universal binary and is not intended for Apple Silicon.
 
 ## What works
 
-- **Audio output:** four-channel Float32 playback at 44.1 kHz. Channels 1–2 carry Master and channels 3–4 carry Headphones, allowing DJ software to route both mixes independently.
-- **Audio input:** a separate stereo CoreAudio device, **Numark NS6 Input**, exposes the controller's hardware master/record return. The NS6 performs the mix in hardware; the driver does not copy its software output into the input. OBS and TikTok LIVE Studio have captured this input while Mixxx continued playback.
-- **MIDI:** bidirectional controller messages and LED output through CoreMIDI, retaining the device identity **Numark NS6** used by existing mappings.
-- **Automatic activation and reconnect:** the session bridge keeps the output active while the controller is connected and reattaches after USB reconnection. Hardware testing confirmed audio and MIDI recovery without restarting Mixxx or the capture app.
-- **Status app:** reports firmware and active CoreAudio clients. The installer installs or updates the app along with the driver and bridge.
-- **Install, upgrade, and uninstall:** package scripts remove conflicting legacy components. The uninstaller removes driver components and receipts while preserving logs and user preferences.
+- **Audio output:** 44.1 kHz, four channels: master on channels 1–2 and headphones on 3–4. CoreAudio clients choose their buffer period; the HAL reports the active period instead of forcing a fixed frame size.
+- **Output clock and buffering:** asynchronous USB output follows the NS6 feedback endpoint with fractional frame scheduling. A bounded queue-occupancy correction bridges the hardware clock to CoreAudio's nominal 44.1 kHz clock. The USB worker maintains eight queued transfers, and a 4,096-frame queue target absorbs timing variation. These are internal transport settings, not the client's CoreAudio buffer period.
+- **Audio input:** the NS6 supplies its own two-channel master/record mix over USB. The driver publishes it as an input device; it does not create the signal by copying the driver's output. Eight ordered asynchronous reads feed a shared sample timeline. The timeline waits for a 2,048-frame reserve, aligns reads to CoreAudio sample time, and applies bounded rate correction so multiple input clients read matching audio intervals.
+- **MIDI and hardware control:** bidirectional MIDI, controller initialization, and communication recovery after USB interruptions. The package also includes the user-session MIDI bridge and the Status app.
+- **Keep-alive and startup:** a persistent system service owns the USB connection and keeps the hardware clock active when audio clients stop. It sends digital silence while idle, so the NS6 can remain initialized without sending audible content. The MIDI bridge starts in the logged-in user session.
+- **Compatibility observed in testing:** the experimental driver has been recognized by Mixxx and, in recorded tests, by Serato and VirtualDJ. Application and macOS-version coverage is not complete, so this is not a claim of official support.
 
-## Problems resolved
+## Current test build
 
-- **TikTok LIVE Studio showed no input level.** The driver now advertises a timestamp period accepted by the app; the NS6 Input meter moves while Mixxx playback and MIDI remain active.
-- **Input pops despite clean output.** Captures showed malformed USB sample lanes even though USB error, dropped-frame, and ring-starvation counters remained at zero. The input reader now keeps eight bulk-IN transfers queued to provide more scheduling margin. A 5.5-minute direct capture and simultaneous Mixxx/TikTok test had no sample jumps or audible pops. Audio samples are not altered to hide transport faults.
-- **Audio and MIDI did not reliably resume after USB reconnect or package update.** The bridge now reattaches the CoreAudio keepalive and MIDI session after the NS6 returns.
-- **Legacy helper conflicts.** Package upgrade hooks stop the old service and remove the conflicting driver before restarting CoreAudio.
-- **MIDI responsiveness during playback.** The modular MIDI bridge and USB scheduling were tested with Mixxx playing; the controls remained responsive during the successful simultaneous input/output test.
+The current experimental source is version **1.0.13**. The Intel installer is included for reproducible testing:
 
-See the detailed [1.0.0 release notes](numark-ns6/docs/releases/1.0.0.md) for validation details and known limits.
+[Download Numark NS6 1.0.13 Intel experimental](packages/NumarkNS6-1.0.13-Intel-experimental.pkg)
 
-## Current limits
+SHA-256: `63224e77fa7bcba7c37e55444699b4da4b1e44d2ad3712db87ac8a2c4a45be36`
 
-- The extended no-pop hardware capture lasted about 5.5 minutes. Longer live streams and testing on other Macs and macOS versions are still needed to establish long-term reliability.
-- The stereo input is the NS6 hardware master/record mix; it does not expose separate microphone and line channels.
-- MIDI SysEx and system-common messages are not forwarded. USB disconnection can also discard MIDI messages already in flight.
-- The package is unsigned and not notarized. macOS may require approval before opening it.
+This local ad-hoc-signed package is not notarized. Installing it replaces existing driver components and restarts CoreAudio. An older Numark kernel extension can claim the controller's USB interface and block this driver; remove that conflict before testing.
 
-## Install
+## Known limitation
 
-Download **NumarkNS6-1.0.0.pkg** from [the 1.0.0 release page](https://github.com/maurojuniorr/numark-ns6-mac-arm64/releases/tag/v1.0.0), open it, and follow Installer. Administrator authorization is required; installation briefly restarts CoreAudio.
+Opening or switching media in Opera has triggered CoreAudio input reconfiguration. The input capture can pause for roughly 400–450 ms during that reconfiguration. The shared timeline and reserve reduce discontinuities caused by scheduling variation, but they cannot prevent CoreAudio from stopping or reconfiguring an input stream. This has been observed with Opera; it is a CoreAudio/device-flow interaction, not a TikTok-specific behavior. Whether output artifacts occur in every such reconfiguration is still unconfirmed.
 
-After installation, connect and power on the NS6. In Mixxx, select **Numark NS6 Output** as the sound device and route Master to channels 1–2 and Headphones to channels 3–4. Select **Numark NS6** for the controller's MIDI input and output. For recording or streaming, select **Numark NS6 Input** as the audio input.
+The 1.0.13 timeline was exercised with synthetic tests and a clean capture on Apple Silicon. Earlier Intel experiments verified playback, input, MIDI, and Serato recognition on macOS Monterey 12.7.6, but long-duration input capture and recovery have not been fully validated on Intel.
 
-## Build and test from source
+## Build
 
-Build on an Apple Silicon Mac with Xcode Command Line Tools:
+Build on a Mac with Xcode and the command-line tools. Select the target architecture explicitly:
 
 ```sh
-./numark-ns6/tools/build-package.sh /private/tmp/ns6-build \
-  /private/tmp/NumarkNS6-local.pkg
+cd coreaudio
+make NS6_ARCH=arm64 EXPERIMENTAL_VERSION=1.0.13 experimental-package
 ```
 
-The packaging script builds the HAL driver, MIDI bridge, Status app, and installer, then runs the project's 14 automated tests. To build and run the test suite without packaging:
+For an Intel package, use `NS6_ARCH=x86_64`. The generated package is under `coreaudio/build-experimental/dist-1.0.13/`. The package target runs the capture timeline, fanout, HAL boundary, service lifecycle, and mapping checks before packaging the HAL driver, USB device service, MIDI bridge, Status app, and launch configuration.
 
-```sh
-cmake -S numark-ns6 -B /private/tmp/ns6-build
-cmake --build /private/tmp/ns6-build
-ctest --test-dir /private/tmp/ns6-build --output-on-failure
-```
+## Project background
 
-To remove the installed driver before testing another package:
+This work builds on the macOS Numark NS6 driver, Linux NS6 protocol research, hardware analysis, and community testing. Thanks to [Gregory Senay](https://github.com/GregorySenay) for independent protocol research.
 
-```sh
-sudo ./numark-ns6/tools/uninstall-driver.sh
-```
-
-The uninstaller asks for confirmation and restarts CoreAudio. It preserves logs and user preferences.
-
-## Project layout
-
-- `numark-ns6/` — current modular CoreAudio driver, MIDI bridge, Status app, package scripts, tests, and release notes.
-- `coreaudio/` — earlier implementation and diagnostics retained for historical reference; use `numark-ns6/` for current builds and packages.
-- `docs/` — hardware research, diagnostic records, and design notes.
-
-## Contributing and reporting issues
-
-Testing on another Apple Silicon Mac, macOS release, DJ application, or streaming app is welcome. For a useful bug report, include the driver version, macOS version, app and audio settings, whether input/output/MIDI were active together, the approximate time of the issue, and relevant driver logs. Contributions to the driver, tests, and documentation are welcome.
+When reporting a problem, include the Mac model, macOS version, driver version, application, selected input/output devices, buffer settings, and approximate time of the event.

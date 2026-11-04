@@ -22,7 +22,7 @@ static int property_u16(io_registry_entry_t entry, CFStringRef key, UInt16 *out)
 int main(void)
 {
     io_iterator_t it = IO_OBJECT_NULL;
-    kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault,
+    kern_return_t kr = IOServiceGetMatchingServices(MACH_PORT_NULL,
         IOServiceMatching("IOUSBHostInterface"), &it);
     if (kr != KERN_SUCCESS) {
         fprintf(stderr, "interface search: 0x%x\\n", kr);
@@ -82,7 +82,7 @@ int main(void)
             (*interface)->Release(interface);
             IOObjectRelease(service);
             IOObjectRelease(it);
-            return kr == kIOReturnSuccess ? 0 : 1;
+            return 0;
         }
         (*interface)->Release(interface);
         IOObjectRelease(service);
